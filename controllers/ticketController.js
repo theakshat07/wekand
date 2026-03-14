@@ -372,6 +372,7 @@ exports.getTicketsByUser = async (req, res) => {
         time: p.time,
         media: p.media,
         ticket_image: p.ticket_image || null,
+        post_status: p.post_status || null,
       };
       return acc;
     }, {});
