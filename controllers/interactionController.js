@@ -635,8 +635,8 @@ exports.rejectJoinRequest = async (req, res) => {
 };
 
 /**
- * Get joined users for a regular plan (approved interactions: join, reaction, comment).
- * Public endpoint – returns list of users who have joined, for guest list modal.
+ * Get joined users for a regular plan (users who joined/reacted/commented – pending or approved).
+ * Public endpoint – returns list of users for guest list modal.
  */
 exports.getJoinedUsers = async (req, res) => {
   try {
@@ -653,7 +653,7 @@ exports.getJoinedUsers = async (req, res) => {
 
     const interactions = await PlanInteraction.find({
       plan_id,
-      status: 'approved',
+      status: { $in: ['pending', 'approved'] },
     })
       .sort({ created_at: -1 })
       .lean();
