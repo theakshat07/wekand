@@ -1,4 +1,4 @@
-const { BasePlan, RegularPlan, BusinessPlan, Repost, User, UserBlock } = require('../models');
+const { BasePlan, RegularPlan, BusinessPlan, Repost, User, UserBlock, PlanInteraction } = require('../models');
 const { sendSuccess, sendError, paginate } = require('../utils');
 const { rankPlansForUser, rankPlansForGuest } = require('../utils/ranking');
 
@@ -222,11 +222,64 @@ exports.getHomeFeed = async (req, res) => {
     });
     
     // Remove ranking scores from final output (optional, for cleaner API response)
-    const finalFeed = combinedFeed.slice(0, safeLimit).map(item => {
+    let finalFeed = combinedFeed.slice(0, safeLimit).map(item => {
       const { _rankingScore, ...rest } = item;
       return rest;
     });
-    
+
+    // Up to 3 recent interactors with avatars for feed card stack (matches GuestListModal / getJoinedUsers)
+    const planIdsForPreview = [
+      ...new Set(
+        finalFeed
+          .filter((item) => (item.interaction_count || 0) > 0)
+          .map((item) => item.post_id),
+      ),
+    ];
+
+    if (planIdsForPreview.length > 0) {
+      const interactions = await PlanInteraction.find({
+        plan_id: { $in: planIdsForPreview },
+        status: { $in: ['pending', 'approved'] },
+      })
+        .sort({ created_at: -1 })
+        .select('plan_id user_id')
+        .lean();
+
+      const planToUserIds = new Map();
+      for (const row of interactions) {
+        const pid = row.plan_id;
+        if (!planToUserIds.has(pid)) planToUserIds.set(pid, []);
+        const arr = planToUserIds.get(pid);
+        if (arr.length >= 3) continue;
+        if (arr.includes(row.user_id)) continue;
+        arr.push(row.user_id);
+      }
+
+      const allPreviewUserIds = [...new Set([].concat(...[...planToUserIds.values()]))];
+      let userById = new Map();
+      if (allPreviewUserIds.length > 0) {
+        const users = await User.find({ user_id: { $in: allPreviewUserIds } })
+          .select('user_id name profile_image')
+          .lean();
+        userById = new Map(users.map((u) => [u.user_id, u]));
+      }
+
+      finalFeed = finalFeed.map((item) => {
+        const uids = planToUserIds.get(item.post_id);
+        if (!uids || uids.length === 0) return item;
+        const interacted_users = uids.map((uid) => {
+          const u = userById.get(uid);
+          return {
+            user_id: uid,
+            id: uid,
+            name: u?.name || 'User',
+            profile_image: u?.profile_image || null,
+          };
+        });
+        return { ...item, interacted_users };
+      });
+    }
+
     return sendSuccess(res, 'Feed retrieved successfully', finalFeed);
   } catch (error) {
     console.error('Error in getHomeFeed:', error);

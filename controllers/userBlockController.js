@@ -1,4 +1,4 @@
-const { UserBlock } = require('../models');
+const { UserBlock, User } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 function getCurrentUserId(req) {
@@ -68,12 +68,31 @@ exports.listBlockedUsers = async (req, res) => {
       .sort({ created_at: -1 })
       .lean();
 
+    const blockedIds = blocks.map((b) => b.blocked_user_id).filter(Boolean);
+    const users =
+      blockedIds.length > 0
+        ? await User.find({ user_id: { $in: blockedIds } })
+            .select('user_id name profile_image')
+            .lean()
+        : [];
+    const userById = new Map(users.map((u) => [String(u.user_id), u]));
+
     return sendSuccess(res, 'Blocked users retrieved successfully', {
-      blocked_users: blocks.map((b) => ({
-        blocked_user_id: b.blocked_user_id,
-        created_at: b.created_at,
-        reason: b.reason || null,
-      })),
+      blocked_users: blocks.map((b) => {
+        const u = userById.get(String(b.blocked_user_id));
+        return {
+          blocked_user_id: b.blocked_user_id,
+          created_at: b.created_at,
+          reason: b.reason || null,
+          user: u
+            ? {
+                user_id: u.user_id,
+                name: u.name || 'User',
+                profile_image: u.profile_image || null,
+              }
+            : null,
+        };
+      }),
     });
   } catch (error) {
     return sendError(res, error.message, 500);

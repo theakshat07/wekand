@@ -366,8 +366,8 @@ Authorization: Bearer <access_token>
 ### 16. Report User APIs
 
 #### Report User
-- **POST** `/user/report` (Auth required)
-- Body: `{ reporter_id, reported_user_id, reason, post_id?, message? }`
+- **POST** `/user/report` (Auth required — reporter is taken from the JWT; do not rely on `reporter_id` in body)
+- Body: `{ reported_user_id, reason, post_id?, message? }`
 - Response: `{ report_id, status }`
 
 #### Get Reports (Admin)

@@ -16,7 +16,7 @@ async function postMemberAddedSystemMessage(group_id, addedUserId) {
     user_id: uid,
     type: 'system',
     content: {
-      text: `${addedName} was added to the group`,
+      text: `${addedName} joined the group`,
       added_user_id: uid,
       added_user_name: addedName,
       added_user_profile_image: addedImage,

@@ -156,7 +156,8 @@ exports.getGroupDetails = async (req, res) => {
         return user ? {
           user_id: user.user_id,
           name: user.name,
-          profile_image: user.profile_image
+          profile_image: user.profile_image,
+          bio: user.bio && String(user.bio).trim() ? String(user.bio).trim() : null,
         } : null;
       })
     );
@@ -168,6 +169,12 @@ exports.getGroupDetails = async (req, res) => {
       media: plan.media || [],
       date: plan.date || null,
       time: plan.time || null,
+      location_text: plan.location_text || null,
+      category_main: plan.category_main || null,
+      category_sub: plan.category_sub || [],
+      temporal_tags: plan.temporal_tags || [],
+      add_details: plan.add_details || [],
+      ticket_image: plan.ticket_image || null,
       joins_count: plan.joins_count != null ? plan.joins_count : ((group.members && group.members.length) || 0)
     } : null;
 
@@ -183,7 +190,7 @@ exports.getGroupDetails = async (req, res) => {
 
 /**
  * Add members to group
- * For each new member, posts a system message: "<name> was added to the group"
+ * For each new member, posts a system message: "<name> joined the group"
  */
 exports.addMembers = async (req, res) => {
   try {
@@ -504,7 +511,7 @@ exports.getMessages = async (req, res) => {
     // Return ascending for UI rendering convenience
     messages = messages.reverse();
 
-    // Never hide "X was added to the group" lines because of block rules (user_id is the added member).
+    // Never hide "X joined the group" lines because of block rules (user_id is the added member).
     if (blockedUserIds.size > 0) {
       messages = messages.filter(
         (m) => m.type === 'system' || !blockedUserIds.has(String(m.user_id))
@@ -933,23 +940,12 @@ exports.getChatLists = async (req, res) => {
         user_id: { $ne: user_id }
       });
 
-      const isBusinessPlan = plan.type === 'business';
-
-      // 2-person event chat: show the other member in the list (host sees guest, guest sees host)
-      let other_member_preview = null;
-      if (isBusinessPlan && group.members.length === 2) {
-        const otherMemberId = group.members.find((m) => String(m) !== String(user_id));
-        if (otherMemberId) {
-          const ou = await User.findOne({ user_id: String(otherMemberId) }).lean();
-          if (ou) {
-            other_member_preview = {
-              user_id: ou.user_id,
-              profile_image: ou.profile_image || null,
-              name: ou.name || '',
-            };
-          }
-        }
-      }
+      // Event thread = business plan's primary group (plan.group_id matches this chat).
+      // Also detect by discriminator / type so lean() queries never mis-classify as 1:1 when `type` is missing.
+      const isEventGroupThread =
+        (plan.group_id && String(plan.group_id) === String(group.group_id)) ||
+        plan.type === 'business' ||
+        plan.plan_type === 'BusinessPlan';
 
       const chatItem = {
         group_id: group.group_id,
@@ -972,12 +968,14 @@ exports.getChatLists = async (req, res) => {
           user_id: lastMessage.user_id
         } : null,
         member_count: group.members.length,
-        // Business event chats are always group threads (even with 2 people) so the app opens group chat UI
-        is_group: isBusinessPlan ? true : group.members.length > 2,
-        group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title),
+        // Event group chats stay group UI even with 2 members (never 1:1 DM routing).
+        is_group: isEventGroupThread ? true : group.members.length > 2,
+        // Never use the other member's name as the thread title for event groups (looks like a DM).
+        group_name: isEventGroupThread
+          ? (group.group_name || plan.title)
+          : (group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title)),
         unread_count: unreadCount,
         is_announcement_group: !!group.is_announcement_group,
-        ...(other_member_preview ? { other_member_preview } : {}),
       };
       
       // Event chat list visibility:
@@ -985,15 +983,15 @@ exports.getChatLists = async (req, res) => {
       // - Shown once there are 2+ members (organiser + first registrant, or more) so host and guests can chat.
       // Note: a strict reading of "not visible unless more than two people" would mean 3+ members and would
       // block organiser + solo registrant; we intentionally use >= 2 to match "add me + talk to admin" flows.
-      if (isBusinessPlan && group.members.length < 2) {
+      if (isEventGroupThread && group.members.length < 2) {
         continue;
       }
       
       // Individual chats (2 members) go to their_plans or my_plans
       // Group chats (3+ members) go to groups
-      // Business plan groups always go to groups, regardless of member count
+      // Event / business plan groups always go to groups, regardless of member count
       // Groups with 1 member (creator only) also go to groups or my_plans
-      if (isBusinessPlan) {
+      if (isEventGroupThread) {
         // Business plan groups go to groups section (when 2+ members)
         groups.push({ ...chatItem, members: group.members });
       } else if (group.members.length === 2) {
