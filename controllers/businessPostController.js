@@ -223,7 +223,7 @@ exports.createBusinessPost = async (req, res) => {
         payload: {
           event_title: plan.title,
           cta_type: 'go_to_event',
-          notification_text: `${plan.title} is live`
+          notification_text: `${plan.title} is Live`
         }
       });
     }

@@ -130,6 +130,8 @@ exports.updateProfile = async (req, res) => {
         ...(sm.facebook !== undefined && { facebook: sm.facebook }),
         ...(sm.snapchat !== undefined && { snapchat: sm.snapchat }),
         ...(sm.google_drive !== undefined && { google_drive: sm.google_drive }),
+        ...(sm.whatsapp !== undefined && { whatsapp: sm.whatsapp }),
+        ...(sm.strava !== undefined && { strava: sm.strava }),
       };
     }
     
