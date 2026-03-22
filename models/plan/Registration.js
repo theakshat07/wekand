@@ -76,6 +76,11 @@ const registrationSchema = new mongoose.Schema({
     type: String,
     default: null // Free text: what brings you to BREATHE?
   },
+  /** Post-event experience (optional); used for organizer analytics */
+  post_event_rating: {
+    type: String,
+    default: null,
+  },
   created_at: {
     type: Date,
     default: Date.now
