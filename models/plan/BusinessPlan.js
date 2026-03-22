@@ -146,6 +146,10 @@ const businessPlanSchema = new mongoose.Schema({
   registration_limit: {
     type: Number,
     default: null // Max number of attendees; null = unlimited
+  },
+  // Monotonic sequence for human check-in codes (PREFIX 01, 02, …). Updated atomically to avoid duplicate codes under concurrent registrations.
+  checkin_sequence: {
+    type: Number
   }
 });
 

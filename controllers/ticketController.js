@@ -17,6 +17,52 @@ function generateTicketNumber() {
 }
 
 /**
+ * Human-readable check-in code: "BREATHE 01", "BREATHE 02", …
+ * Prefix = organizer’s first name (letters only, max 12), rank = monotonic per plan via atomic $inc
+ * (countDocuments+1 would collide when two users register at the same time).
+ */
+async function generateOrganizerCheckinCode(plan) {
+  const planId = plan.plan_id;
+  const ownerId = plan.user_id || plan.business_id;
+  let firstWord = 'Guest';
+  if (ownerId) {
+    const owner = await User.findOne({ user_id: ownerId }).lean();
+    if (owner && owner.name) {
+      firstWord = owner.name.trim().split(/\s+/)[0] || firstWord;
+    }
+  }
+  const lettersOnly = String(firstWord).replace(/[^a-zA-Z]/g, '');
+  const prefix = (lettersOnly.length ? lettersOnly : 'GUEST').slice(0, 12).toUpperCase();
+
+  const existingCount = await Registration.countDocuments({
+    plan_id: planId,
+    status: { $in: ['pending', 'approved'] },
+  });
+
+  // Single atomic update: if checkin_sequence is unset, seed from existingCount then +1; else +1.
+  // Avoids duplicate codes when two signups run concurrently (plain count+1 or backfill+$inc races).
+  const updated = await BusinessPlan.findOneAndUpdate(
+    { plan_id: planId },
+    [
+      {
+        $set: {
+          checkin_sequence: {
+            $add: [{ $ifNull: ['$checkin_sequence', existingCount] }, 1],
+          },
+        },
+      },
+    ],
+    { new: true }
+  );
+  if (!updated || updated.checkin_sequence == null) {
+    throw new Error('Failed to allocate check-in sequence for plan');
+  }
+  const rank = updated.checkin_sequence;
+  const rankStr = rank < 100 ? String(rank).padStart(2, '0') : String(rank);
+  return `${prefix} ${rankStr}`;
+}
+
+/**
  * Generate QR code data and hash
  */
 function generateQRCodeData(ticketId, planId, userId) {
@@ -104,29 +150,11 @@ exports.registerForEvent = async (req, res) => {
       return sendError(res, `This event has reached its capacity (${plan.registration_limit} attendees). No more registrations are allowed.`, 400);
     }
 
-    // Determine if this is a free event without ticket types (no passes configured)
-    const hasPasses = Array.isArray(plan.passes) && plan.passes.length > 0;
-    const isFreeNoPassesEvent = !hasPasses;
-
-    // For free events without passes, generate a human–readable check‑in / confirmation code
     let checkinCode = null;
-    if (isFreeNoPassesEvent) {
-      try {
-        const ownerId = plan.user_id || plan.business_id;
-        let organizerFirstName = 'Guest';
-        if (ownerId) {
-          const owner = await User.findOne({ user_id: ownerId }).lean();
-          if (owner && owner.name) {
-            organizerFirstName = owner.name.trim().split(/\s+/)[0] || organizerFirstName;
-          }
-        }
-        const prefix = organizerFirstName.toUpperCase();
-        const rankNumber = registrationCount + 1; // next registrant
-        const rankSuffix = String(rankNumber).padStart(2, '0');
-        checkinCode = `${prefix}${rankSuffix}`;
-      } catch (codeError) {
-        console.error('Failed to generate checkin code for free event:', codeError);
-      }
+    try {
+      checkinCode = await generateOrganizerCheckinCode(plan);
+    } catch (codeError) {
+      console.error('Failed to generate checkin code:', codeError);
     }
 
     // Get pass details if pass_id provided
@@ -1129,12 +1157,20 @@ exports.verifyPayment = async (req, res) => {
       razorpay_payment_id,
     });
 
+    let paidCheckinCode = null;
+    try {
+      paidCheckinCode = await generateOrganizerCheckinCode(plan);
+    } catch (e) {
+      console.error('Failed to generate checkin code (paid):', e);
+    }
+
     const registration = await Registration.create({
       registration_id: generateId('registration'),
       plan_id,
       user_id,
       pass_id: pass_id || null,
       ticket_id: ticketId,
+      checkin_code: paidCheckinCode,
       status: plan.registration_required ? 'pending' : 'approved',
       price_paid: pricePaid,
       razorpay_order_id,
