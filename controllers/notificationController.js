@@ -236,8 +236,12 @@ exports.createGeneralNotification = async (user_id, type, opts = {}) => {
 exports.getUnreadCount = async (req, res) => {
   try {
     const { user_id } = req.query;
+    if (!user_id) {
+      return sendError(res, 'user_id is required', 400);
+    }
+    const uid = String(user_id);
     const count = await Notification.countDocuments({
-      user_id,
+      $or: [{ user_id: uid }, { user_id: user_id }],
       is_read: false
     });
     
