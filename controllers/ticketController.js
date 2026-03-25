@@ -8,12 +8,25 @@ const {
 } = require('../services/chatGroupMemberNotifications');
 
 /**
- * Generate unique ticket number (e.g., DEUB2345439)
+ * Generate human-readable ticket number: OwnerFirstName01, OwnerFirstName02, …
+ * Uses the plan's checkin_sequence (atomic $inc) to guarantee uniqueness.
  */
-function generateTicketNumber() {
-  const prefix = 'DEUB'; // Can be customized per business/event
-  const randomNum = Math.floor(Math.random() * 10000000).toString().padStart(10, '0');
-  return `${prefix}${randomNum}`;
+async function generateTicketNumber(plan) {
+  const ownerId = plan.user_id || plan.business_id;
+  let firstName = 'GUEST';
+  if (ownerId) {
+    const owner = await User.findOne({ user_id: ownerId }).select('name').lean();
+    if (owner && owner.name) {
+      const letters = owner.name.trim().split(/\s+/)[0].replace(/[^a-zA-Z]/g, '');
+      if (letters) firstName = letters;
+    }
+  }
+  const prefix = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+
+  const existingTickets = await Ticket.countDocuments({ plan_id: plan.plan_id });
+  const seq = existingTickets + 1;
+  const seqStr = seq < 100 ? String(seq).padStart(2, '0') : String(seq);
+  return `${prefix}${seqStr}`;
 }
 
 /**
@@ -172,7 +185,7 @@ exports.registerForEvent = async (req, res) => {
 
     // Generate ticket
     const ticketId = generateId('ticket');
-    const ticketNumber = generateTicketNumber();
+    const ticketNumber = await generateTicketNumber(plan);
     const { qrData, qrHash } = generateQRCodeData(ticketId, plan_id, user_id);
     
     // Create ticket
@@ -1164,7 +1177,7 @@ exports.verifyPayment = async (req, res) => {
 
     const pricePaid = amount_paise / 100;
     const ticketId = generateId('ticket');
-    const ticketNumber = generateTicketNumber();
+    const ticketNumber = await generateTicketNumber(plan);
     const { qrData, qrHash } = generateQRCodeData(ticketId, plan_id, user_id);
 
     const ticket = await Ticket.create({
