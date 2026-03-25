@@ -744,7 +744,19 @@ exports.getGuestList = async (req, res) => {
       return sendError(res, 'Event not found', 404);
     }
 
+    const requestingUserId = req.user?.user_id || req.query?.user_id;
     const owner_id = plan.user_id || plan.business_id;
+    const isOwner = requestingUserId && (
+      String(requestingUserId) === String(plan.user_id) ||
+      String(requestingUserId) === String(plan.business_id)
+    );
+
+    if (!plan.allow_view_guest_list && !isOwner) {
+      return sendSuccess(res, 'Guest list is hidden for this event', {
+        guests: [],
+        total: 0,
+      });
+    }
     const registrations = await Registration.find({
       plan_id,
       status: { $in: REGISTERED_STATUSES },
@@ -811,40 +823,51 @@ exports.getAttendeeList = async (req, res) => {
     const registrations = await Registration.find({ plan_id })
       .sort({ created_at: -1 })
       .lean();
-    
-    // Get ticket and user details for each registration
-    const attendeeList = await Promise.all(
-      registrations.map(async (reg) => {
-        const ticket = reg.ticket_id 
-          ? await Ticket.findOne({ ticket_id: reg.ticket_id }).lean()
-          : null;
-        
-        const user = await User.findOne({ user_id: reg.user_id }).lean();
-        
-        return {
-          registration_id: reg.registration_id,
-          user_id: reg.user_id,
-          user: user ? {
-            user_id: user.user_id,
-            name: user.name,
-            profile_image: user.profile_image
-          } : null,
-          ticket_id: reg.ticket_id,
-          ticket_number: ticket?.ticket_number || null,
-          checkin_code: reg.checkin_code || null,
-          status: reg.status,
-          checked_in: reg.checked_in || ticket?.checked_in || false,
-          checked_in_at: reg.checked_in_at || ticket?.checked_in_at || null,
-          checked_in_via: reg.checked_in_via || null,
-          price_paid: reg.price_paid,
-          created_at: reg.created_at,
-          age_range: reg.age_range || null,
-          gender: reg.gender || user?.gender || null,
-          running_experience: reg.running_experience || null,
-          what_brings_you: reg.what_brings_you || null
-        };
-      })
-    );
+
+    // Bulk-fetch users and tickets to avoid N+1 queries
+    const userIds = [...new Set(registrations.map(r => r.user_id).filter(Boolean))];
+    const ticketIds = [...new Set(registrations.map(r => r.ticket_id).filter(Boolean))];
+
+    const [users, tickets] = await Promise.all([
+      userIds.length > 0
+        ? User.find({ user_id: { $in: userIds } }).select('user_id name profile_image phone_number gender').lean()
+        : Promise.resolve([]),
+      ticketIds.length > 0
+        ? Ticket.find({ ticket_id: { $in: ticketIds } }).select('ticket_id ticket_number checked_in checked_in_at').lean()
+        : Promise.resolve([]),
+    ]);
+
+    const userMap = new Map(users.map(u => [u.user_id, u]));
+    const ticketMap = new Map(tickets.map(t => [t.ticket_id, t]));
+
+    const attendeeList = registrations.map((reg) => {
+      const user = userMap.get(reg.user_id) || null;
+      const ticket = reg.ticket_id ? ticketMap.get(reg.ticket_id) || null : null;
+      return {
+        registration_id: reg.registration_id,
+        user_id: reg.user_id,
+        user: user ? {
+          user_id: user.user_id,
+          name: user.name,
+          profile_image: user.profile_image,
+          phone_number: user.phone_number || null
+        } : null,
+        phone_number: user?.phone_number || null,
+        ticket_id: reg.ticket_id,
+        ticket_number: ticket?.ticket_number || null,
+        checkin_code: reg.checkin_code || null,
+        status: reg.status,
+        checked_in: reg.checked_in || ticket?.checked_in || false,
+        checked_in_at: reg.checked_in_at || ticket?.checked_in_at || null,
+        checked_in_via: reg.checked_in_via || null,
+        price_paid: reg.price_paid,
+        created_at: reg.created_at,
+        age_range: reg.age_range || null,
+        gender: reg.gender || user?.gender || null,
+        running_experience: reg.running_experience || null,
+        what_brings_you: reg.what_brings_you || null
+      };
+    });
     
     // Get check-in statistics
     const totalRegistrations = registrations.length;

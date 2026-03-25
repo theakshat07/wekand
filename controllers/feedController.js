@@ -12,8 +12,7 @@ exports.getHomeFeed = async (req, res) => {
     const { category_main, category_sub = [], location } = filters;
     
     const query = {
-      post_status: 'published',
-      is_live: true,
+      post_status: { $in: ['published', 'completed'] },
       is_draft: false,
       deleted_at: null
     };

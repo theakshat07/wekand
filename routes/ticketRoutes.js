@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const ticketController = require('../controllers/ticketController');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, optionalAuth } = require('../middleware/auth');
 
 // Razorpay: create order (authenticated)
 router.post('/create-order', authenticate, ticketController.createOrder);
@@ -22,8 +22,8 @@ router.get('/user/:user_id', authenticate, ticketController.getTicketsByUser);
 // Get attendee list (must be before /:plan_id/:user_id)
 router.get('/attendees/:plan_id', authenticate, ticketController.getAttendeeList);
 
-// Get guest list – who's coming (public; must be before /:plan_id/:user_id)
-router.get('/guest-list/:plan_id', ticketController.getGuestList);
+// Get guest list – who's coming (optionalAuth so we can check ownership for allow_view_guest_list)
+router.get('/guest-list/:plan_id', optionalAuth, ticketController.getGuestList);
 
 // Get registration count for a plan (public – check if event is full)
 router.get('/registration-count/:plan_id', ticketController.getRegistrationCount);
