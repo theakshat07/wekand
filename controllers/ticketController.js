@@ -24,19 +24,23 @@ async function generateTicketNumber(plan) {
   const prefix = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
 
   const planId = plan.plan_id;
-  // Backfill-safe seed: if ticket_sequence is missing, start from existing ticket count.
-  const existingTickets = await Ticket.countDocuments({ plan_id: planId });
+  // Backfill-safe seed for old plans that don't have ticket_sequence yet.
+  if (plan.ticket_sequence == null) {
+    const existingTickets = await Ticket.countDocuments({ plan_id: planId });
+    await BusinessPlan.updateOne(
+      { plan_id: planId, ticket_sequence: { $exists: false } },
+      { $set: { ticket_sequence: existingTickets } }
+    );
+    await BusinessPlan.updateOne(
+      { plan_id: planId, ticket_sequence: null },
+      { $set: { ticket_sequence: existingTickets } }
+    );
+  }
+
+  // Atomic increment: guarantees sequential unique number per event.
   const updated = await BusinessPlan.findOneAndUpdate(
     { plan_id: planId },
-    [
-      {
-        $set: {
-          ticket_sequence: {
-            $add: [{ $ifNull: ['$ticket_sequence', existingTickets] }, 1],
-          },
-        },
-      },
-    ],
+    { $inc: { ticket_sequence: 1 } },
     { new: true }
   );
   if (!updated || updated.ticket_sequence == null) {
@@ -65,24 +69,25 @@ async function generateOrganizerCheckinCode(plan) {
   const lettersOnly = String(firstWord).replace(/[^a-zA-Z]/g, '');
   const prefix = (lettersOnly.length ? lettersOnly : 'GUEST').slice(0, 12).toUpperCase();
 
-  const existingCount = await Registration.countDocuments({
-    plan_id: planId,
-    status: { $in: ['pending', 'approved'] },
-  });
+  if (plan.checkin_sequence == null) {
+    const existingCount = await Registration.countDocuments({
+      plan_id: planId,
+      status: { $in: ['pending', 'approved'] },
+    });
+    await BusinessPlan.updateOne(
+      { plan_id: planId, checkin_sequence: { $exists: false } },
+      { $set: { checkin_sequence: existingCount } }
+    );
+    await BusinessPlan.updateOne(
+      { plan_id: planId, checkin_sequence: null },
+      { $set: { checkin_sequence: existingCount } }
+    );
+  }
 
-  // Single atomic update: if checkin_sequence is unset, seed from existingCount then +1; else +1.
-  // Avoids duplicate codes when two signups run concurrently (plain count+1 or backfill+$inc races).
+  // Atomic increment: guarantees sequential unique code per event.
   const updated = await BusinessPlan.findOneAndUpdate(
     { plan_id: planId },
-    [
-      {
-        $set: {
-          checkin_sequence: {
-            $add: [{ $ifNull: ['$checkin_sequence', existingCount] }, 1],
-          },
-        },
-      },
-    ],
+    { $inc: { checkin_sequence: 1 } },
     { new: true }
   );
   if (!updated || updated.checkin_sequence == null) {
