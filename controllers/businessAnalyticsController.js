@@ -260,6 +260,9 @@ exports.getOverallAnalytics = async (req, res) => {
         months,
         plan_ids: [],
         events_count: 0,
+        events_this_month: 0,
+        avg_attendance_per_event: 0,
+        retention_rate: 0,
         registered_count: 0,
         checked_in_count: 0,
         showup_rate: 0,
@@ -350,11 +353,28 @@ exports.getOverallAnalytics = async (req, res) => {
       })
     );
 
+    // Calculate events this month
+    const now = new Date();
+    const startThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const plansThisMonth = plans.filter(p => new Date(p.created_at) >= startThisMonth);
+    const eventsThisMonth = plansThisMonth.length;
+
+    // Calculate average attendance per event
+    const avgAttendancePerEvent = plans.length > 0 
+      ? Math.round((total_registered / plans.length) * 100) / 100 
+      : 0;
+
+    // Retention rate is already calculated as returning_percent
+    const retentionRate = Math.round(returning_percent * 100) / 100;
+
     return sendSuccess(res, 'Overall analytics retrieved', {
       since: since.toISOString(),
       months,
       plan_ids,
       events_count: plans.length,
+      events_this_month: eventsThisMonth,
+      avg_attendance_per_event: avgAttendancePerEvent,
+      retention_rate: retentionRate,
       registered_count: total_registered,
       checked_in_count,
       showup_rate: Math.round(showup_rate * 100) / 100,

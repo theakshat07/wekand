@@ -464,12 +464,25 @@ All analytics endpoints require the caller to be the business/event owner.
 - **GET** `/analytics/business/overall?months=1`
 - Auth: Bearer token; uses token’s `user_id` as business owner.
 - Query: `months` (default 1, max 12).
-- Response (in `data`): same metrics aggregated over all events created in the last N months, plus `per_event[]` with per-event summary (plan_id, title, registered_count, checked_in_count, showup_rate_percent, revenue).
+- Response (in `data`): 
+  - `events_count`: Total number of events created
+  - `events_this_month`: Number of events created this month
+  - `avg_attendance_per_event`: Average registration count per event
+  - `retention_rate`: Percentage of returning members (same as returning_percent)
+  - `revenue`: Total revenue from all events
+  - `registered_count`, `checked_in_count`, `showup_rate`, `showup_rate_percent`
+  - `first_timers_count`, `returning_count`, `first_timers_percent`, `returning_percent`
+  - `gender_distribution` (male, female, other), `gender_distribution_percent`
+  - `per_event[]`: Per-event summary (plan_id, title, registered_count, checked_in_count, showup_rate_percent, revenue).
 
 Metrics definitions:
+- **Total Events**: Total number of events created by the business
+- **Events This Month**: Number of events created in the current calendar month
+- **Avg Attendance per Event**: Average number of registrations per event
+- **Retention Rate**: Percentage of users who attended more than one event (same as returning percent)
 - **Showup rate**: # checked in / # registered (per event or overall).
-- **% First timers**: # users who registered for the first time on this business’s events / total registered.
-- **% Returning**: # users who registered more than once on this business’s events / total registered.
+- **% First timers**: # users who registered for the first time on this business's events / total registered.
+- **% Returning**: # users who registered more than once on this business's events / total registered.
 - **Revenue**: sum of `price_paid` from registrations.
 - **Gender distribution**: Male, Female, Others (from user profile).
 
