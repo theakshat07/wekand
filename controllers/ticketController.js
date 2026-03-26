@@ -382,6 +382,11 @@ exports.getTicketsByUser = async (req, res) => {
         media: p.media,
         ticket_image: p.ticket_image || null,
         post_status: p.post_status || null,
+        passes: p.passes || [],
+        add_details: p.add_details || [],
+        category_main: p.category_main || null,
+        category_sub: p.category_sub || [],
+        group_id: p.group_id || null,
       };
       return acc;
     }, {});
@@ -398,6 +403,8 @@ exports.getTicketsByUser = async (req, res) => {
     const list = tickets.map((t) => ({
       ticket_id: t.ticket_id,
       ticket_number: t.ticket_number,
+      pass_id: t.pass_id || null,
+      qr_code_hash: t.qr_code_hash,
       status: t.status,
       price_paid: t.price_paid,
       created_at: t.created_at,
@@ -742,6 +749,15 @@ exports.getGuestList = async (req, res) => {
     const plan = await BusinessPlan.findOne({ plan_id }).lean();
     if (!plan) {
       return sendError(res, 'Event not found', 404);
+    }
+
+    // Check if guest list viewing is disabled
+    if (!plan.allow_view_guest_list) {
+      return sendSuccess(res, 'Guest list is disabled by the host', {
+        guests: [],
+        total: 0,
+        guest_list_disabled: true
+      });
     }
 
     const owner_id = plan.user_id || plan.business_id;
