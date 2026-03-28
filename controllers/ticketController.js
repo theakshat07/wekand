@@ -137,6 +137,10 @@ exports.registerForEvent = async (req, res) => {
       return sendError(res, 'This endpoint is only for business plans', 400);
     }
 
+    if (plan.post_status === 'completed' || plan.post_status === 'expired') {
+      return sendError(res, 'Registration is closed for this event.', 400);
+    }
+
     if (plan.is_women_only) {
       const registeringUser = await User.findOne({ user_id }).lean();
       const profileGender = (registeringUser?.gender || '').toLowerCase();

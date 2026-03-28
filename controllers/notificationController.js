@@ -4,6 +4,37 @@ const { sendSuccess, sendError, generateId } = require('../utils');
 const INDIVIDUAL_TYPES_BUSINESS = ['post_live', 'event_ended', 'event_ended_registered', 'event_ended_attended', 'free_event_cancelled', 'paid_event_cancelled', 'event_chat_poll_vote'];
 const INDIVIDUAL_TYPES_REGULAR = ['registration_successful', 'event_ended', 'free_event_cancelled', 'paid_event_cancelled', 'plan_shared_chat'];
 
+/** When the plan row is missing or legacy-soft-deleted, still show a card in notifications. */
+function stubPostFromInteractions(planId, interactions) {
+  let title = 'Event';
+  for (const n of interactions || []) {
+    const p = n.payload || {};
+    if (p.event_title && String(p.event_title).trim()) {
+      title = String(p.event_title).trim();
+      break;
+    }
+    if (p.notification_text && typeof p.notification_text === 'string') {
+      const line = p.notification_text.split(/\n/)[0].split(/\.(?:\s|$)/)[0];
+      if (line && line.trim()) {
+        title = line.trim();
+        break;
+      }
+    }
+  }
+  return {
+    plan_id: planId,
+    title,
+    description: '',
+    media: [],
+    category_main: null,
+    category_sub: [],
+    date: null,
+    time: null,
+    end_time: null,
+    location_text: ''
+  };
+}
+
 /**
  * Get notifications list grouped by post
  */
@@ -57,7 +88,7 @@ exports.getNotifications = async (req, res) => {
 
     const [posts, users, planInteractions] = await Promise.all([
       postIds.length > 0
-        ? BasePlan.find({ plan_id: { $in: postIds }, deleted_at: null }).lean()
+        ? BasePlan.find({ plan_id: { $in: postIds } }).lean()
         : Promise.resolve([]),
       userIds.length > 0
         ? User.find({ user_id: { $in: userIds } }).lean()
@@ -116,8 +147,11 @@ exports.getNotifications = async (req, res) => {
             date: post.date != null ? post.date : null,
             time: post.time != null ? post.time : null,
             end_time: post.end_time != null ? post.end_time : null,
-            location_text: post.location_text != null ? post.location_text : ''
+            location_text: post.location_text != null ? post.location_text : '',
+            post_status: post.post_status != null ? post.post_status : undefined
           };
+        } else {
+          group.post = stubPostFromInteractions(group.post_id, group.interactions);
         }
       }
 

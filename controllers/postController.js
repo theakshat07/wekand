@@ -178,8 +178,9 @@ exports.deletePost = async (req, res) => {
       return sendError(res, "Post not found", 404);
     }
 
+    // Archive: keep row and all related data; do not set deleted_at (used for feed/notification hydration).
     plan.post_status = "deleted";
-    plan.deleted_at = new Date();
+    plan.deleted_at = null;
     await plan.save();
 
     return sendSuccess(res, "Post deleted successfully");

@@ -244,10 +244,9 @@ function isPastEvent(eventDate) {
  * Rank plans for a registered user
  */
 function rankPlansForUser(plans, user) {
-  // Filter out past events
-  const validPlans = plans.filter(plan => !isPastEvent(plan.date));
-  
-  // Calculate scores and add to plans
+  // Include past events (urgency score is 0 for past days; they rank lower but stay visible)
+  const validPlans = plans;
+
   const plansWithScores = validPlans.map(plan => {
     const scoreData = calculateRegisteredUserScore(plan, user);
     return {
@@ -267,10 +266,8 @@ function rankPlansForUser(plans, user) {
  * Rank plans for a guest user
  */
 function rankPlansForGuest(plans) {
-  // Filter out past events
-  const validPlans = plans.filter(plan => !isPastEvent(plan.date));
-  
-  // Calculate scores and add to plans
+  const validPlans = plans;
+
   const plansWithScores = validPlans.map(plan => {
     const scoreData = calculateGuestUserScore(plan);
     return {
