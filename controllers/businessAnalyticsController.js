@@ -22,6 +22,54 @@ function bucketGender(raw) {
   return 'other';
 }
 
+/**
+ * Deleted/cancelled before the scheduled event date — ticket revenue must not count in org totals.
+ */
+function isEarlyCancelledExcludeRevenue(plan) {
+  if (!plan || !plan.plan_id) return false;
+  const st = String(plan.post_status || '').toLowerCase();
+  if (st !== 'deleted' && st !== 'cancelled') return false;
+  if (!plan.date) return false;
+  const eventDate = new Date(plan.date);
+  if (Number.isNaN(eventDate.getTime())) return false;
+  const cancelAt = plan.deleted_at || plan.updated_at;
+  if (!cancelAt) return false;
+  const t = new Date(cancelAt);
+  if (Number.isNaN(t.getTime())) return false;
+  return t < eventDate;
+}
+
+/** Lifetime sum of price_paid for all owner plans, excluding early-cancelled events. */
+async function computeLifetimeRevenueForOwner(callerId) {
+  const allPlans = await BusinessPlan.find({
+    $or: [{ user_id: callerId }, { business_id: callerId }],
+  })
+    .select('plan_id date post_status deleted_at updated_at')
+    .lean();
+
+  if (allPlans.length === 0) return 0;
+
+  const exclude = new Set();
+  for (const p of allPlans) {
+    if (isEarlyCancelledExcludeRevenue(p)) exclude.add(p.plan_id);
+  }
+
+  const planIds = allPlans.map((p) => p.plan_id);
+  const regs = await Registration.find({
+    plan_id: { $in: planIds },
+    status: { $in: REGISTERED_STATUSES },
+  })
+    .select('plan_id price_paid')
+    .lean();
+
+  let sum = 0;
+  for (const r of regs) {
+    if (exclude.has(r.plan_id)) continue;
+    sum += Number(r.price_paid) || 0;
+  }
+  return Math.round(sum * 100) / 100;
+}
+
 /** Ticket / pass slice percents that sum to 100 (largest remainder). */
 function ticketPercentsNormalized(countByPassId, total, passNameById) {
   if (total <= 0) return [];
@@ -255,6 +303,9 @@ exports.getOverallAnalytics = async (req, res) => {
       .lean();
 
     const plan_ids = plans.map((p) => p.plan_id);
+    // Top-card "Revenue Generated": lifetime total for all plans, excluding events cancelled before their date.
+    const revenueLifetime = await computeLifetimeRevenueForOwner(caller_id);
+
     if (plan_ids.length === 0) {
       return sendSuccess(res, 'Overall analytics retrieved', {
         since: since.toISOString(),
@@ -272,7 +323,7 @@ exports.getOverallAnalytics = async (req, res) => {
         returning_count: 0,
         first_timers_percent: 0,
         returning_percent: 0,
-        revenue: 0,
+        revenue: revenueLifetime,
         gender_distribution: { male: 0, female: 0, other: 0 },
         gender_distribution_percent: { male: 0, female: 0, other: 0 },
         per_event: [],
@@ -287,7 +338,6 @@ exports.getOverallAnalytics = async (req, res) => {
     const total_registered = registrations.length;
     const checked_in_count = registrations.filter((r) => r.checked_in).length;
     const showup_rate = total_registered > 0 ? checked_in_count / total_registered : 0;
-    const revenue = registrations.reduce((sum, r) => sum + (Number(r.price_paid) || 0), 0);
 
     const user_ids = [...new Set(registrations.map((r) => r.user_id))];
     const ownerPlanIdsAll = plan_ids;
@@ -384,7 +434,7 @@ exports.getOverallAnalytics = async (req, res) => {
       returning_count,
       first_timers_percent: Math.round(first_timers_percent * 100) / 100,
       returning_percent: Math.round(returning_percent * 100) / 100,
-      revenue: Math.round(revenue * 100) / 100,
+      revenue: revenueLifetime,
       gender_distribution: { male: genderMap.male, female: genderMap.female, other: genderMap.other },
       gender_distribution_percent,
       per_event,
