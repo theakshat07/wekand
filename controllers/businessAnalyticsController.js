@@ -457,7 +457,7 @@ exports.getBusinessAnalyticsEvents = async (req, res) => {
         .limit(limitNum)
         .sort({ created_at: -1 })
         .select(
-          'plan_id title category_main status start_date end_date created_at media is_paid_plan',
+          'plan_id title category_main status start_date end_date created_at media ticket_image is_paid_plan',
         )
         .lean(),
       BusinessPlan.countDocuments(ownerQuery),
@@ -497,6 +497,8 @@ exports.getBusinessAnalyticsEvents = async (req, res) => {
         end_date: plan.end_date,
         created_at: plan.created_at,
         is_paid_plan: !!plan.is_paid_plan,
+        media: Array.isArray(plan.media) ? plan.media : [],
+        ticket_image: plan.ticket_image || null,
         analytics: {
           registered_count,
           checked_in_count,
