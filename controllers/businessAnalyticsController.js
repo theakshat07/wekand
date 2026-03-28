@@ -1,4 +1,4 @@
-const { BusinessPlan, Registration, User, BasePlan, PlanInteraction } = require('../models');
+const { BusinessPlan, Registration, User } = require('../models');
 const { sendSuccess, sendError, paginate } = require('../utils');
 
 const REGISTERED_STATUSES = ['pending', 'approved'];
@@ -210,6 +210,7 @@ exports.getEventAnalytics = async (req, res) => {
     return sendSuccess(res, 'Event analytics retrieved', {
       plan_id,
       title: plan.title,
+      is_paid_plan: !!plan.is_paid_plan,
       registered_count: total_registered,
       checked_in_count,
       showup_rate: Math.round(showup_rate * 100) / 100,
@@ -402,92 +403,77 @@ exports.getBusinessAnalyticsEvents = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const { skip, limit: limitNum } = paginate(page, limit);
-    
-    // Get all plans for the business user without status filtering
+
     const userId = req.user?.user_id;
     if (!userId) {
       return sendError(res, 'User authentication required', 401);
     }
-    
-    const plans = await BasePlan.find({ user_id: userId })
-      .skip(skip)
-      .limit(limitNum)
-      .sort({ created_at: -1 });
-    
-    const total = await BasePlan.countDocuments({ user_id: userId });
-    
-    // Get analytics for each event
-    const eventsWithAnalytics = await Promise.all(
-      plans.map(async (plan) => {
-        try {
-          // Get basic analytics for this event
-          const interactions = await PlanInteraction.find({ 
-            plan_id: plan.plan_id,
-            interaction_type: 'join',
-            status: 'approved'
-          });
-          
-          const checkedInInteractions = await PlanInteraction.find({
-            plan_id: plan.plan_id,
-            interaction_type: 'join',
-            status: 'approved',
-            checked_in: true
-          });
-          
-          const registered_count = interactions.length;
-          const checked_in_count = checkedInInteractions.length;
-          const showup_rate = registered_count > 0 ? checked_in_count / registered_count : 0;
-          
-          // Calculate revenue
-          const revenue = await PlanInteraction.aggregate([
-            { $match: { plan_id: plan.plan_id, interaction_type: 'join', status: 'approved' } },
-            { $group: { _id: null, total: { $sum: '$price_paid' } } }
-          ]).then(result => result[0]?.total || 0);
-          
-          return {
-            plan_id: plan.plan_id,
-            title: plan.title,
-            category_main: plan.category_main,
-            status: plan.status, // ongoing, ended, cancelled
-            start_date: plan.start_date,
-            end_date: plan.end_date,
-            created_at: plan.created_at,
-            analytics: {
-              registered_count,
-              checked_in_count,
-              showup_rate: Math.round(showup_rate * 10000) / 100,
-              revenue: Math.round(revenue * 100) / 100
-            }
-          };
-        } catch (error) {
-          console.error(`Error getting analytics for plan ${plan.plan_id}:`, error);
-          return {
-            plan_id: plan.plan_id,
-            title: plan.title,
-            category_main: plan.category_main,
-            status: plan.status,
-            start_date: plan.start_date,
-            end_date: plan.end_date,
-            created_at: plan.created_at,
-            analytics: {
-              registered_count: 0,
-              checked_in_count: 0,
-              showup_rate: 0,
-              revenue: 0
-            }
-          };
-        }
-      })
-    );
-    
+
+    const ownerQuery = { $or: [{ user_id: userId }, { business_id: userId }] };
+
+    const [plans, total] = await Promise.all([
+      BusinessPlan.find(ownerQuery)
+        .skip(skip)
+        .limit(limitNum)
+        .sort({ created_at: -1 })
+        .select(
+          'plan_id title category_main status start_date end_date created_at media is_paid_plan',
+        )
+        .lean(),
+      BusinessPlan.countDocuments(ownerQuery),
+    ]);
+
+    const planIds = plans.map((p) => p.plan_id);
+    const allRegs =
+      planIds.length > 0
+        ? await Registration.find({
+            plan_id: { $in: planIds },
+            status: { $in: REGISTERED_STATUSES },
+          }).lean()
+        : [];
+
+    const regsByPlan = {};
+    planIds.forEach((id) => {
+      regsByPlan[id] = [];
+    });
+    allRegs.forEach((r) => {
+      if (!regsByPlan[r.plan_id]) regsByPlan[r.plan_id] = [];
+      regsByPlan[r.plan_id].push(r);
+    });
+
+    const eventsWithAnalytics = plans.map((plan) => {
+      const regs = regsByPlan[plan.plan_id] || [];
+      const registered_count = regs.length;
+      const checked_in_count = regs.filter((r) => r.checked_in).length;
+      const showup_rate = registered_count > 0 ? checked_in_count / registered_count : 0;
+      const revenue = regs.reduce((sum, r) => sum + (Number(r.price_paid) || 0), 0);
+
+      return {
+        plan_id: plan.plan_id,
+        title: plan.title,
+        category_main: plan.category_main,
+        status: plan.status,
+        start_date: plan.start_date,
+        end_date: plan.end_date,
+        created_at: plan.created_at,
+        is_paid_plan: !!plan.is_paid_plan,
+        analytics: {
+          registered_count,
+          checked_in_count,
+          showup_rate: Math.round(showup_rate * 10000) / 100,
+          revenue: Math.round(revenue * 100) / 100,
+        },
+      };
+    });
+
     return sendSuccess(res, 'Business analytics events retrieved successfully', {
       events: eventsWithAnalytics,
       pagination: {
-        page: parseInt(page),
+        page: parseInt(page, 10),
         limit: limitNum,
         total,
-        pages: Math.ceil(total / limitNum)
-      }
+        pages: Math.ceil(total / limitNum) || 1,
+      },
     });
   } catch (error) {
     console.error('Error in getBusinessAnalyticsEvents:', error);

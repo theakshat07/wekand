@@ -275,36 +275,93 @@ exports.updateBusinessPost = async (req, res) => {
       }
     }
 
-    const plan = await BusinessPlan.findOne({ plan_id: post_id });
+    const plan = await BusinessPlan.findOne({ plan_id: post_id }).lean();
     if (!plan) {
       return sendError(res, 'Business post not found', 404);
     }
-    
-    // Handle post media file uploads if present
+
+    // Post media: client sends a manifest in `media` (JSON array) with { url, type } for existing
+    // CDN images and { url: null, type } for each new local file, plus multipart `files` only for locals.
+    // Never append uploads to existing DB media (that duplicated the same image on every save).
     const postMediaFiles = ensureArray(req.files?.files);
+    let uploadedMedia = [];
     if (postMediaFiles.length > 0) {
       const uploadPromises = postMediaFiles.map(async (file) => {
         try {
           const isVideo = file.mimetype.startsWith('video/');
-          const result = isVideo 
-            ? await uploadVideo(file) 
-            : await uploadImage(file);
-          
+          const result = isVideo ? await uploadVideo(file) : await uploadImage(file);
           cleanupFile(file.path);
-          
           return {
             url: result.url,
             type: isVideo ? 'video' : 'image',
-            size: result.bytes
+            size: result.bytes,
           };
         } catch (error) {
           cleanupFile(file.path);
           throw error;
         }
       });
-      
-      const newMedia = await Promise.all(uploadPromises);
-      updateData.media = [...(plan.media || []), ...newMedia];
+      uploadedMedia = await Promise.all(uploadPromises);
+    }
+
+    const manifest = Array.isArray(updateData.media) ? updateData.media : null;
+    const hasNullSlot =
+      manifest &&
+      manifest.some(
+        (m) =>
+          m &&
+          typeof m === 'object' &&
+          (m.url === null || m.url === undefined || String(m.url).trim() === ''),
+      );
+
+    if (uploadedMedia.length > 0) {
+      if (manifest && manifest.length > 0 && hasNullSlot) {
+        let ui = 0;
+        updateData.media = manifest
+          .map((slot) => {
+            if (!slot || typeof slot !== 'object') return null;
+            const rawUrl = slot.url;
+            const hasUrl =
+              rawUrl !== null &&
+              rawUrl !== undefined &&
+              String(rawUrl).trim() !== '';
+            if (hasUrl) {
+              return {
+                url: String(rawUrl).trim(),
+                type: slot.type || 'image',
+                size: slot.size,
+              };
+            }
+            const up = uploadedMedia[ui++];
+            return up || null;
+          })
+          .filter(Boolean);
+        if (ui !== uploadedMedia.length) {
+          console.warn(
+            `[businessPost] Media manifest / upload count mismatch for ${post_id}: expected ${uploadedMedia.length} uploads, used ${ui}`,
+          );
+        }
+      } else if (manifest && manifest.length > 0 && !hasNullSlot) {
+        // Old clients: manifest is all URLs but files were still sent — keep URLs only (no duplicate uploads)
+        updateData.media = manifest
+          .filter((m) => m && m.url && String(m.url).trim())
+          .map((m) => ({
+            url: String(m.url).trim(),
+            type: m.type || 'image',
+            size: m.size,
+          }));
+      } else {
+        updateData.media = uploadedMedia;
+      }
+      updateData.media_count = Array.isArray(updateData.media) ? updateData.media.length : 0;
+    } else if (manifest && Array.isArray(manifest)) {
+      updateData.media = manifest
+        .filter((m) => m && m.url && String(m.url).trim())
+        .map((m) => ({
+          url: String(m.url).trim(),
+          type: m.type || 'image',
+          size: m.size,
+        }));
       updateData.media_count = updateData.media.length;
     }
     
@@ -360,57 +417,66 @@ exports.updateBusinessPost = async (req, res) => {
       // Allow updating ticket image URL directly
       updateData.ticket_image = req.body.ticket_image;
     }
-    
-    // Remove files from update data
+
     delete updateData.files;
 
     const wasDeleted = updateData.post_status === 'deleted';
     const refundPaidTickets = req.body.refund_paid_tickets === true || req.body.refund_paid_tickets === 'true';
-    Object.assign(plan, updateData);
-    await plan.save();
+
+    const sanitized = {};
+    Object.keys(updateData).forEach((k) => {
+      if (updateData[k] !== undefined) sanitized[k] = updateData[k];
+    });
+
+    await BusinessPlan.updateOne({ plan_id: post_id }, { $set: sanitized });
+
+    const planAfter = await BusinessPlan.findOne({ plan_id: post_id }).lean();
+    if (!planAfter) {
+      return sendError(res, 'Business post not found after update', 404);
+    }
 
     // Only when event is explicitly CANCELLED (refund_paid_tickets: true), refund paid tickets.
     // When event is just DELETED (e.g. after event is done), do not refund.
-    if (wasDeleted && refundPaidTickets && plan.plan_id) {
-      refundPaidTicketsForPlan(plan.plan_id)
+    if (wasDeleted && refundPaidTickets && planAfter.plan_id) {
+      refundPaidTicketsForPlan(planAfter.plan_id)
         .then((result) => {
           if (result.refunded > 0 || result.failed > 0) {
-            console.log(`[businessPost] Auto-refund on cancel plan ${plan.plan_id}: refunded=${result.refunded}, failed=${result.failed}`);
+            console.log(`[businessPost] Auto-refund on cancel plan ${planAfter.plan_id}: refunded=${result.refunded}, failed=${result.failed}`);
           }
         })
         .catch((err) => console.error('[businessPost] Auto-refund on cancel failed:', err.message));
     }
 
     // Event cancelled: notify owner (business user) and all registrants (regular users)
-    if (wasDeleted && plan.plan_id && plan.title) {
+    if (wasDeleted && planAfter.plan_id && planAfter.title) {
       const notifType = refundPaidTickets ? 'paid_event_cancelled' : 'free_event_cancelled';
       const notifTextOwner = refundPaidTickets
-        ? `${plan.title} is cancelled. Refunds are processed`
-        : `${plan.title} is cancelled.`;
+        ? `${planAfter.title} is cancelled. Refunds are processed`
+        : `${planAfter.title} is cancelled.`;
       const notifTextUser = refundPaidTickets
-        ? `${plan.title} is cancelled. Your refund is processed`
-        : `${plan.title} is cancelled.`;
+        ? `${planAfter.title} is cancelled. Your refund is processed`
+        : `${planAfter.title} is cancelled.`;
 
-      if (plan.user_id) {
-        await createGeneralNotification(plan.user_id, notifType, {
-          source_plan_id: plan.plan_id,
+      if (planAfter.user_id) {
+        await createGeneralNotification(planAfter.user_id, notifType, {
+          source_plan_id: planAfter.plan_id,
           source_user_id: 'system',
-          payload: { event_title: plan.title, cta_type: 'go_to_event', notification_text: notifTextOwner }
+          payload: { event_title: planAfter.title, cta_type: 'go_to_event', notification_text: notifTextOwner }
         });
       }
-      const registrations = await Registration.find({ plan_id: plan.plan_id, status: { $in: ['pending', 'approved'] } }).select('user_id').lean();
+      const registrations = await Registration.find({ plan_id: planAfter.plan_id, status: { $in: ['pending', 'approved'] } }).select('user_id').lean();
       for (const reg of registrations) {
-        if (reg.user_id && reg.user_id !== plan.user_id) {
+        if (reg.user_id && reg.user_id !== planAfter.user_id) {
           await createGeneralNotification(reg.user_id, notifType, {
-            source_plan_id: plan.plan_id,
+            source_plan_id: planAfter.plan_id,
             source_user_id: 'system',
-            payload: { event_title: plan.title, cta_type: 'go_to_event', notification_text: notifTextUser }
+            payload: { event_title: planAfter.title, cta_type: 'go_to_event', notification_text: notifTextUser }
           });
         }
       }
     }
 
-    return sendSuccess(res, 'Business post updated successfully', plan);
+    return sendSuccess(res, 'Business post updated successfully', planAfter);
   } catch (error) {
     const allFiles = getAllFiles(req.files);
     allFiles.forEach((file) => file && file.path && cleanupFile(file.path));
