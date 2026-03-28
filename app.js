@@ -127,7 +127,7 @@ app.use((err, req, res, next) => {
   // Handle multer errors
   if (err.name === 'MulterError') {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return sendError(res, 'File too large. Maximum size is 50MB', 400);
+      return sendError(res, 'File too large. Maximum size is 10MB per file', 400);
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
       return sendError(res, 'Too many files. Maximum is 10 files', 400);
