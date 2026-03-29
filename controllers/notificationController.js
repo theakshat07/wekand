@@ -41,11 +41,18 @@ function stubPostFromInteractions(planId, interactions) {
 exports.getNotifications = async (req, res) => {
   try {
     const { user_id, limit = '20', offset = '0' } = req.query;
+
+    if (!user_id || typeof user_id !== 'string') {
+      return sendError(res, 'Invalid user_id', 400);
+    }
+    
+    const uid = String(user_id);
+
     const safeLimit = Math.min(50, Math.max(1, parseInt(String(limit), 10) || 20));
     const safeOffset = Math.max(0, parseInt(String(offset), 10) || 0);
 
-    const notifications = await Notification.find({ user_id })
-      .sort({ created_at: -1 })
+const notifications = await Notification.find({ user_id: uid })     
+ .sort({ created_at: -1 })
       .skip(safeOffset)
       .limit(safeLimit)
       .lean();
@@ -302,12 +309,15 @@ exports.buildGroupedKey = buildGroupedKey;
 exports.getUnreadCount = async (req, res) => {
   try {
     const { user_id } = req.query;
-    if (!user_id) {
-      return sendError(res, 'user_id is required', 400);
+    
+    if (!user_id || typeof user_id !== 'string') {
+      return sendError(res, 'Invalid user_id', 400);
     }
+    
     const uid = String(user_id);
+
     const count = await Notification.countDocuments({
-      $or: [{ user_id: uid }, { user_id: user_id }],
+      user_id: uid,
       is_read: false
     });
     
