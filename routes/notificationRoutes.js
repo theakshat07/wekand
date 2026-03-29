@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 
 router.get('/list', authenticate, notificationController.getNotifications);
 router.post('/mark-read', authenticate, notificationController.markAsRead);
+router.post('/mark-read-bulk', authenticate, notificationController.markAsReadBulk);
 router.get('/counter', authenticate, notificationController.getUnreadCount);
 
 module.exports = router;

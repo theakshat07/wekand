@@ -246,6 +246,37 @@ exports.markAsRead = async (req, res) => {
 };
 
 /**
+ * Mark many notifications as read in one DB round-trip (authenticated user only).
+ * Body: { notification_ids: string[] } — max 100 ids; only rows owned by the token user are updated.
+ */
+exports.markAsReadBulk = async (req, res) => {
+  try {
+    const uid = req.user?.user_id;
+    if (!uid) {
+      return sendError(res, 'Unauthorized', 401);
+    }
+    const { notification_ids } = req.body;
+    if (!Array.isArray(notification_ids) || notification_ids.length === 0) {
+      return sendError(res, 'notification_ids must be a non-empty array', 400);
+    }
+    const ids = [...new Set(notification_ids.map((id) => String(id).trim()).filter(Boolean))].slice(0, 100);
+    if (ids.length === 0) {
+      return sendError(res, 'No valid notification ids', 400);
+    }
+    const result = await Notification.updateMany(
+      { user_id: uid, notification_id: { $in: ids }, is_read: false },
+      { $set: { is_read: true } }
+    );
+    return sendSuccess(res, 'Notifications marked as read', {
+      modified_count: result.modifiedCount ?? result.nModified ?? 0,
+      matched_count: result.matchedCount ?? 0,
+    });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
  * Create a general (system or user) notification. Used by other controllers.
  * @param {string} user_id - Recipient user id
  * @param {string} type - Notification type (e.g. post_live, event_ended, registration_successful)
@@ -304,22 +335,48 @@ exports.createGeneralNotification = async (user_id, type, opts = {}) => {
 };
 
 /**
- * Get unread count
+ * Types that duplicate the same "event ended" moment for organizers (tab badge should not triple-count).
+ * The primary row users care about is usually `event_ended`.
+ */
+const BADGE_EXCLUDED_TYPES = ['event_ended_registered', 'event_ended_attended'];
+
+/** Ignore ancient unread rows for the tab badge only (full=1 still counts everything). */
+const BADGE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
+
+/**
+ * Get unread count for tab badge (default) or full DB count (full=1).
+ * Default matches navbar: excludes organizer analytics duplicates + very old unreads.
  */
 exports.getUnreadCount = async (req, res) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, full } = req.query;
     if (!user_id) {
       return sendError(res, 'user_id is required', 400);
     }
     const uid = String(user_id);
-    const count = await Notification.countDocuments({
+    const wantFull = full === '1' || full === 'true';
+
+    const base = {
       $or: [{ user_id: uid }, { user_id: user_id }],
       is_read: false
-    });
-    
+    };
+
+    let filter;
+    if (wantFull) {
+      filter = base;
+    } else {
+      filter = {
+        ...base,
+        type: { $nin: BADGE_EXCLUDED_TYPES },
+        created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) }
+      };
+    }
+
+    const count = await Notification.countDocuments(filter);
+
     return sendSuccess(res, 'Unread count retrieved successfully', {
-      unread_count: count
+      unread_count: count,
+      ...(wantFull ? {} : { badge_mode: 'tab', badge_excludes: BADGE_EXCLUDED_TYPES })
     });
   } catch (error) {
     return sendError(res, error.message, 500);
