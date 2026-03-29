@@ -54,6 +54,11 @@ const notificationSchema = new mongoose.Schema({
 
 notificationSchema.index({ user_id: 1, is_read: 1 });
 notificationSchema.index({ user_id: 1, created_at: -1 });
+/** Idempotency: one logical notification per (type, plan, recipient); sparse allows legacy docs with grouped_key null */
+notificationSchema.index(
+  { grouped_key: 1 },
+  { unique: true, sparse: true }
+);
 
 module.exports = mongoose.model('Notification', notificationSchema);
 

@@ -21,6 +21,15 @@ const connectDB = async () => {
       console.warn('[MongoDB] Ticket index sync (non-fatal):', idxErr?.message || idxErr);
     }
 
+    // Run scripts/dedupe-notifications.js first if you have duplicate (user_id,type,source_plan_id) rows,
+    // or creating a unique index on grouped_key may fail until duplicates are removed.
+    try {
+      const Notification = require('../models/other/Notification');
+      await Notification.syncIndexes();
+    } catch (idxErr) {
+      console.warn('[MongoDB] Notification index sync (non-fatal):', idxErr?.message || idxErr);
+    }
+
     return conn;
   } catch (error) {
     console.error('Error connecting to MongoDB:', error.message);

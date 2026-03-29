@@ -41,10 +41,21 @@ async function deactivatePastEventPlans() {
           checked_in: true
         });
 
-        await BusinessPlan.updateOne(
-          { plan_id },
-          { $set: { post_status: 'completed', is_live: false, updated_at: new Date() } }
-        );
+        /**
+         * Only ONE worker/process may transition published → completed for this plan.
+         * Without this, PM2 cluster / duplicate schedulers both see `published` and each insert
+         * the same event_ended rows (duplicate notifications within milliseconds).
+         */
+        const transitioned = await BusinessPlan.findOneAndUpdate(
+          { plan_id, post_status: 'published' },
+          { $set: { post_status: 'completed', is_live: false, updated_at: new Date() } },
+          { new: true }
+        ).lean();
+
+        if (!transitioned) {
+          continue;
+        }
+
         deactivated++;
 
         // Use counts fetched before update (registrations are not deleted)

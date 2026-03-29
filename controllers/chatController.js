@@ -456,10 +456,10 @@ exports.sendMessage = async (req, res) => {
           source_user_id: user_id,
           payload: {
             event_title: planTitle,
-            cta_type: 'go_to_plan',
+            cta_type: message.message_id,
             notification_text: `${senderName} shared a plan with you`,
-            plan_id: contentToStore.plan_id
-          }
+            plan_id: contentToStore.plan_id,
+          },
         });
       }
     }
@@ -804,7 +804,7 @@ exports.votePoll = async (req, res) => {
                 source_user_id: 'system',
                 payload: {
                   event_title: eventTitle,
-                  cta_type: 'go_to_chat',
+                  cta_type: String(poll_id),
                   group_id: grp.group_id,
                   poll_id,
                   notification_text: `${pct}% voted ${optText} for ${eventTitle}`,

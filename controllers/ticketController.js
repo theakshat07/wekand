@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const config = require('../config');
-const { Ticket, Registration, BusinessPlan, User, ChatGroup, Notification, PaymentOrder } = require('../models');
+const { Ticket, Registration, BusinessPlan, User, ChatGroup, PaymentOrder } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 const {
   addMemberToChatGroupIfNeeded,
@@ -8,6 +8,7 @@ const {
 } = require('../services/chatGroupMemberNotifications');
 const { sendEventRegistrationWhatsApp } = require('../utils/whatsappCloudApi');
 const { getEventEndDateForDeactivation } = require('../utils/eventSchedule');
+const { createGeneralNotification } = require('./notificationController');
 
 /**
  * Generate human-readable ticket number: OwnerFirstName01, OwnerFirstName02, …
@@ -326,7 +327,6 @@ exports.registerForEvent = async (req, res) => {
     const user = await User.findOne({ user_id }).lean();
 
     // Notify registrant (regular user): Registration Successful
-    const { createGeneralNotification } = require('./notificationController');
     if (plan.title) {
       await createGeneralNotification(user_id, 'registration_successful', {
         source_plan_id: plan_id,
@@ -344,10 +344,7 @@ exports.registerForEvent = async (req, res) => {
     const ownerId = plan.user_id || plan.business_id;
     if (ownerId && ownerId !== user_id) {
       try {
-        await Notification.create({
-          notification_id: generateId('notification'),
-          user_id: ownerId,
-          type: 'join',
+        await createGeneralNotification(ownerId, 'join', {
           source_plan_id: plan_id,
           source_user_id: user_id,
           payload: {
@@ -355,8 +352,8 @@ exports.registerForEvent = async (req, res) => {
             ticket_id: ticketId,
             plan_title: plan.title,
             message: user?.name ? `${user.name} registered for your event "${plan.title}".` : 'Someone registered for your event.',
+            cta_type: registration.registration_id || ticketId || 'default',
           },
-          is_read: false,
         });
       } catch (notifErr) {
         console.error('Failed to create registration notification:', notifErr);

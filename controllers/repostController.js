@@ -1,5 +1,6 @@
-const { Repost, BasePlan, Notification } = require('../models');
+const { Repost, BasePlan } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
+const { createGeneralNotification } = require('./notificationController');
 
 /**
  * Create repost
@@ -39,14 +40,16 @@ exports.createRepost = async (req, res) => {
     
     // Create notification for original post author
     if (originalPlan.user_id !== repost_author_id) {
-      await Notification.create({
-        notification_id: generateId('notification'),
-        user_id: originalPlan.user_id, // Notify the original post author
-        type: 'repost',
+      await createGeneralNotification(originalPlan.user_id, 'repost', {
         source_plan_id: original_plan_id,
         source_user_id: repost_author_id,
-        payload: { repost_id: repost.repost_id, added_content, repost_title, repost_description },
-        is_read: false
+        payload: {
+          repost_id: repost.repost_id,
+          added_content,
+          repost_title,
+          repost_description,
+          cta_type: repost.repost_id,
+        },
       });
     }
     

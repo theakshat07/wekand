@@ -246,13 +246,33 @@ exports.markAsRead = async (req, res) => {
 };
 
 /**
+ * Idempotency key — strict 4-part form (recipient = user_id param to createGeneralNotification).
+ * Fourth segment must differ when CTA semantics differ; use a stable id (e.g. interaction_id) when many rows share type+plan+recipient.
+ */
+function buildGroupedKey(type, source_plan_id, recipientUserId, payload = {}) {
+  const plan = source_plan_id != null && source_plan_id !== '' ? String(source_plan_id) : 'no-plan';
+  const uid = String(recipientUserId);
+  const cta =
+    payload && payload.cta_type != null && String(payload.cta_type).trim() !== ''
+      ? String(payload.cta_type).trim()
+      : 'default';
+  return `${type}_${plan}_${uid}_${cta}`;
+}
+
+/**
  * Create a general (system or user) notification. Used by other controllers.
+ * Idempotent: sets grouped_key; duplicate inserts fail silently on unique index (race-safe).
  * @param {string} user_id - Recipient user id
  * @param {string} type - Notification type (e.g. post_live, event_ended, registration_successful)
- * @param {object} opts - { source_plan_id?, source_user_id (default 'system'), payload }
+ * @param {object} opts - { source_plan_id?, source_user_id (default 'system'), payload, grouped_key? }
  */
 exports.createGeneralNotification = async (user_id, type, opts = {}) => {
-  const { source_plan_id = null, source_user_id = 'system', payload = {} } = opts;
+  const { source_plan_id = null, source_user_id = 'system', payload = {}, grouped_key: groupedKeyOverride = null } = opts;
+  const grouped_key =
+    groupedKeyOverride != null && String(groupedKeyOverride).trim() !== ''
+      ? String(groupedKeyOverride).trim()
+      : buildGroupedKey(type, source_plan_id, user_id, payload);
+
   try {
     await Notification.create({
       notification_id: generateId('notification'),
@@ -261,13 +281,20 @@ exports.createGeneralNotification = async (user_id, type, opts = {}) => {
       source_plan_id,
       source_user_id,
       payload,
-      is_read: false
+      is_read: false,
+      grouped_key,
     });
-    console.log('[createGeneralNotification] created type=', type, 'user_id=', user_id, 'plan_id=', source_plan_id || 'none');
+    console.log('[createGeneralNotification] created type=', type, 'user_id=', user_id, 'plan_id=', source_plan_id || 'none', 'grouped_key=', grouped_key);
   } catch (err) {
-    console.error('[createGeneralNotification]', err.message);
+    if (err && err.code === 11000 && err.keyPattern && err.keyPattern.grouped_key) {
+      return;
+    }
+    throw err;
   }
 };
+
+/** @deprecated use buildGroupedKey — exported for jobs/tests */
+exports.buildGroupedKey = buildGroupedKey;
 
 /**
  * Get unread count

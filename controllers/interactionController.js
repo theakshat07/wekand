@@ -1,5 +1,6 @@
 const { PlanInteraction, BasePlan, Notification, Repost } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
+const { createGeneralNotification } = require('./notificationController');
 
 /**
  * Add comment
@@ -32,40 +33,28 @@ exports.addComment = async (req, res) => {
         // This is a repost - notify both the repost author and original author
         // Notify repost author
         if (repost.repost_author_id !== user_id) {
-          await Notification.create({
-            notification_id: generateId('notification'),
-            user_id: repost.repost_author_id,
-            type: 'comment',
+          await createGeneralNotification(repost.repost_author_id, 'comment', {
             source_plan_id: post_id,
             source_user_id: user_id,
-            payload: { comment_id: interaction.interaction_id, text, is_repost: true },
-            is_read: false
+            payload: { comment_id: interaction.interaction_id, text, is_repost: true, cta_type: interaction.interaction_id },
           });
         }
         
         // Notify original author
         const originalPlan = await BasePlan.findOne({ plan_id: repost.original_plan_id });
         if (originalPlan && originalPlan.user_id !== user_id && originalPlan.user_id !== repost.repost_author_id) {
-          await Notification.create({
-            notification_id: generateId('notification'),
-            user_id: originalPlan.user_id,
-            type: 'comment',
+          await createGeneralNotification(originalPlan.user_id, 'comment', {
             source_plan_id: repost.original_plan_id,
             source_user_id: user_id,
-            payload: { comment_id: interaction.interaction_id, text, is_repost: true, repost_id: repost.repost_id },
-            is_read: false
+            payload: { comment_id: interaction.interaction_id, text, is_repost: true, repost_id: repost.repost_id, cta_type: interaction.interaction_id },
           });
         }
       } else {
         // Regular post - notify only the post author
-        await Notification.create({
-          notification_id: generateId('notification'),
-          user_id: plan.user_id,
-          type: 'comment',
+        await createGeneralNotification(plan.user_id, 'comment', {
           source_plan_id: post_id,
           source_user_id: user_id,
-          payload: { comment_id: interaction.interaction_id, text },
-          is_read: false
+          payload: { comment_id: interaction.interaction_id, text, cta_type: interaction.interaction_id },
         });
       }
     }
@@ -162,40 +151,28 @@ exports.addReaction = async (req, res) => {
         // This is a repost - notify both the repost author and original author
         // Notify repost author
         if (repost.repost_author_id !== user_id) {
-          await Notification.create({
-            notification_id: generateId('notification'),
-            user_id: repost.repost_author_id,
-            type: 'reaction',
+          await createGeneralNotification(repost.repost_author_id, 'reaction', {
             source_plan_id: post_id,
             source_user_id: user_id,
-            payload: { emoji_type, is_repost: true },
-            is_read: false
+            payload: { emoji_type, is_repost: true, cta_type: interaction.interaction_id },
           });
         }
         
         // Notify original author
         const originalPlan = await BasePlan.findOne({ plan_id: repost.original_plan_id });
         if (originalPlan && originalPlan.user_id !== user_id && originalPlan.user_id !== repost.repost_author_id) {
-          await Notification.create({
-            notification_id: generateId('notification'),
-            user_id: originalPlan.user_id,
-            type: 'reaction',
+          await createGeneralNotification(originalPlan.user_id, 'reaction', {
             source_plan_id: repost.original_plan_id,
             source_user_id: user_id,
-            payload: { emoji_type, is_repost: true, repost_id: repost.repost_id },
-            is_read: false
+            payload: { emoji_type, is_repost: true, repost_id: repost.repost_id, cta_type: interaction.interaction_id },
           });
         }
       } else {
         // Regular post - notify only the post author
-        await Notification.create({
-          notification_id: generateId('notification'),
-          user_id: plan.user_id,
-          type: 'reaction',
+        await createGeneralNotification(plan.user_id, 'reaction', {
           source_plan_id: post_id,
           source_user_id: user_id,
-          payload: { emoji_type },
-          is_read: false
+          payload: { emoji_type, cta_type: interaction.interaction_id },
         });
       }
     }
@@ -247,14 +224,10 @@ exports.createJoinRequest = async (req, res) => {
     // Create notification for post author
     const plan = await BasePlan.findOne({ plan_id: post_id });
     if (plan && plan.user_id !== user_id) {
-      await Notification.create({
-        notification_id: generateId('notification'),
-        user_id: plan.user_id, // Notify the post author
-        type: 'join',
+      await createGeneralNotification(plan.user_id, 'join', {
         source_plan_id: post_id,
         source_user_id: user_id,
-        payload: { request_id: interaction.interaction_id, message: message || null },
-        is_read: false
+        payload: { request_id: interaction.interaction_id, message: message || null, cta_type: interaction.interaction_id },
       });
     }
     
@@ -315,14 +288,10 @@ exports.createJoinRequestWithReaction = async (req, res) => {
     // Create notification for post author
     const plan = await BasePlan.findOne({ plan_id: post_id });
     if (plan && plan.user_id !== user_id) {
-      await Notification.create({
-        notification_id: generateId('notification'),
-        user_id: plan.user_id,
-        type: 'reaction',
+      await createGeneralNotification(plan.user_id, 'reaction', {
         source_plan_id: post_id,
         source_user_id: user_id,
-        payload: { request_id: interaction.interaction_id, emoji_type },
-        is_read: false
+        payload: { request_id: interaction.interaction_id, emoji_type, cta_type: interaction.interaction_id },
       });
     }
     
@@ -417,39 +386,27 @@ exports.createJoinRequestWithComment = async (req, res) => {
         // This is a repost - notify both the repost author and original author
         // Notify repost author
         if (repost.repost_author_id !== user_id) {
-          await Notification.create({
-            notification_id: generateId('notification'),
-            user_id: repost.repost_author_id,
-            type: 'comment',
+          await createGeneralNotification(repost.repost_author_id, 'comment', {
             source_plan_id: repost.repost_id, // Use repost_id as source
             source_user_id: user_id,
-            payload: { request_id: interaction.interaction_id, text, is_repost: true },
-            is_read: false
+            payload: { request_id: interaction.interaction_id, text, is_repost: true, cta_type: interaction.interaction_id },
           });
         }
         
         // Notify original author
         if (originalPlan && originalPlan.user_id !== user_id && originalPlan.user_id !== repost.repost_author_id) {
-          await Notification.create({
-            notification_id: generateId('notification'),
-            user_id: originalPlan.user_id,
-            type: 'comment',
+          await createGeneralNotification(originalPlan.user_id, 'comment', {
             source_plan_id: repost.original_plan_id,
             source_user_id: user_id,
-            payload: { request_id: interaction.interaction_id, text, is_repost: true, repost_id: repost.repost_id },
-            is_read: false
+            payload: { request_id: interaction.interaction_id, text, is_repost: true, repost_id: repost.repost_id, cta_type: interaction.interaction_id },
           });
         }
       } else {
         // Regular post - notify only the post author
-        await Notification.create({
-          notification_id: generateId('notification'),
-          user_id: plan.user_id,
-          type: 'comment',
+        await createGeneralNotification(plan.user_id, 'comment', {
           source_plan_id: post_id,
           source_user_id: user_id,
-          payload: { request_id: interaction.interaction_id, text },
-          is_read: false
+          payload: { request_id: interaction.interaction_id, text, cta_type: interaction.interaction_id },
         });
       }
     }
@@ -528,18 +485,15 @@ exports.approveJoinRequest = async (req, res) => {
       const { User } = require('../models');
       const author = await User.findOne({ user_id: authorId }).lean();
       
-      await Notification.create({
-        notification_id: generateId('notification'),
-        user_id: interaction.user_id, // Notify the requester
-        type: 'join',
+      await createGeneralNotification(interaction.user_id, 'join', {
         source_plan_id: interaction.plan_id,
         source_user_id: authorId,
-        payload: { 
+        payload: {
           request_id: interaction.interaction_id,
           status: 'approved',
-          message: `Your request to join "${plan?.title || 'the plan'}" has been approved!`
+          message: `Your request to join "${plan?.title || 'the plan'}" has been approved!`,
+          cta_type: interaction.interaction_id,
         },
-        is_read: false
       });
     }
     
