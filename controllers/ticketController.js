@@ -6,6 +6,7 @@ const {
   addMemberToChatGroupIfNeeded,
   postMemberAddedSystemMessage,
 } = require('../services/chatGroupMemberNotifications');
+const { sendEventRegistrationWhatsApp } = require('../utils/whatsappCloudApi');
 
 /**
  * Generate human-readable ticket number: OwnerFirstName01, OwnerFirstName02, …
@@ -345,6 +346,17 @@ exports.registerForEvent = async (req, res) => {
         console.error('Failed to create registration notification:', notifErr);
       }
     }
+
+    // WhatsApp: event registration confirmation (Meta template; requires env)
+    setImmediate(() => {
+      sendEventRegistrationWhatsApp({
+        user,
+        planTitle: plan.title,
+        ticketNumber: ticket.ticket_number,
+      }).catch((err) =>
+        console.error('[WhatsApp] event registration (free):', err)
+      );
+    });
 
     // Get plan details for ticket display (include group_id for "Go to chat")
     const planDetails = {
@@ -1269,6 +1281,18 @@ exports.verifyPayment = async (req, res) => {
     }
 
     const user = await User.findOne({ user_id }).lean();
+
+    // WhatsApp: event registration confirmation after paid ticket (Meta template; requires env)
+    setImmediate(() => {
+      sendEventRegistrationWhatsApp({
+        user,
+        planTitle: plan.title,
+        ticketNumber: ticket.ticket_number,
+      }).catch((err) =>
+        console.error('[WhatsApp] event registration (paid):', err)
+      );
+    });
+
     const planDetails = {
       plan_id: plan.plan_id,
       title: plan.title,
