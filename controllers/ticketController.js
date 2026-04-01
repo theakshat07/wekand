@@ -1130,10 +1130,12 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 'Use the free registration flow for free tickets', 400);
     }
 
-    const PLATFORM_FEE_PERCENT = 10;
     const baseAmountPaise = Math.round(amount * 100);
-    const platformFeePaise = Math.round((baseAmountPaise * PLATFORM_FEE_PERCENT) / 100);
-    const amountPaise = baseAmountPaise + platformFeePaise;
+    /** Disabled: 10% platform fee (was inflating Razorpay charge, e.g. ₹1 → ₹1.10). Re-enable by uncommenting below. */
+    // const PLATFORM_FEE_PERCENT = 10;
+    // const platformFeePaise = Math.round((baseAmountPaise * PLATFORM_FEE_PERCENT) / 100);
+    // const amountPaise = baseAmountPaise + platformFeePaise;
+    const amountPaise = baseAmountPaise;
     // Razorpay receipt must be ≤40 chars; we store plan_id/user_id in PaymentOrder
     const receipt = `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`.slice(0, 40);
 
